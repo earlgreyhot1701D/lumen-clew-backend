@@ -15,6 +15,24 @@ const logger = {
 
 const GITHUB_URL_REGEX = /github\.com\/([a-zA-Z0-9_-]+)\/([a-zA-Z0-9_.-]+)\/?$/;
 
+// Build headers with optional GitHub token
+function getGitHubHeaders() {
+  const headers = {
+    'Accept': 'application/vnd.github.v3+json',
+    'User-Agent': 'LumenClew/1.0',
+  };
+
+  // Add token if available (increases rate limit from 60/hr to 5000/hr)
+  if (process.env.GITHUB_TOKEN) {
+    headers['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
+    logger.debug('Using GitHub token for authentication');
+  } else {
+    logger.warn('No GITHUB_TOKEN found - using unauthenticated requests (60/hr limit)');
+  }
+
+  return headers;
+}
+
 function isAllowedFile(filePath) {
   for (const ignored of CONFIG.FILES_TO_IGNORE) {
     if (filePath.startsWith(ignored) || filePath.includes(`/${ignored}`)) {
@@ -34,7 +52,11 @@ async function downloadFile(owner, repo, filePath, targetDir) {
     const parentDir = path.dirname(targetPath);
     fs.mkdirSync(parentDir, { recursive: true });
 
+    // Use token for raw content too if available
+    const headers = getGitHubHeaders();
+    
     const response = await fetch(url, {
+      headers,
       signal: AbortSignal.timeout(10000),
     });
 
@@ -91,11 +113,10 @@ export async function fetchGitHubRepo(repoUrl, scanMode = 'fast') {
   let treeData;
 
   try {
+    const headers = getGitHubHeaders();
+    
     const response = await fetch(treeUrl, {
-      headers: {
-        Accept: 'application/vnd.github.v3+json',
-        'User-Agent': 'LumenClew/1.0',
-      },
+      headers,
       signal: AbortSignal.timeout(30000),
     });
 
@@ -104,6 +125,30 @@ export async function fetchGitHubRepo(repoUrl, scanMode = 'fast') {
       return {
         success: false,
         error: 'Repository not found (404)',
+      };
+    }
+
+    if (response.status === 403) {
+      cleanupDir(tempDir);
+      const rateLimitRemaining = response.headers.get('x-ratelimit-remaining');
+      const rateLimitReset = response.headers.get('x-ratelimit-reset');
+      
+      if (rateLimitRemaining === '0') {
+        const resetTime = rateLimitReset 
+          ? new Date(parseInt(rateLimitReset) * 1000).toISOString()
+          : 'unknown';
+        
+        return {
+          success: false,
+          error: process.env.GITHUB_TOKEN 
+            ? `GitHub API rate limit exceeded. Resets at ${resetTime}`
+            : `GitHub API rate limit exceeded (60/hr for unauthenticated requests). Add GITHUB_TOKEN to increase limit to 5000/hr. Resets at ${resetTime}`,
+        };
+      }
+      
+      return {
+        success: false,
+        error: 'GitHub API access forbidden (403)',
       };
     }
 
