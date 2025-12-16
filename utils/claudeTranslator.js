@@ -234,9 +234,15 @@ export async function translatePanel(panel, rawFindings) {
   const { capped, truncated, originalCount } = capFindingsBySeverity(rawFindings);
 
   const systemPrompt = getSystemPromptFor(panel);
+  
+  // ✅ UPDATED PROMPT: Explicitly request ID field and exact count
   const userPrompt = `Translate these ${panel} findings into warm, educational language.
 
+IMPORTANT: You MUST return exactly ${capped.length} translations, one for each input finding.
+Each translation MUST include the original finding's "id" field so we can match them.
+
 For each finding, return a JSON object with:
+- id: The EXACT id from the input finding (REQUIRED - copy it exactly)
 - plainLanguage: A clear, jargon-free explanation (1-2 sentences)
 - context: Why this matters and what it might affect
 - importance: One of "fyi", "note", "explore", or "important"
@@ -244,7 +250,7 @@ For each finding, return a JSON object with:
 - commonApproaches: (optional) Array of 2-3 common ways teams handle this
 - staticAnalysisNote: (optional) Limitations of automated detection
 
-Return a JSON array of translated findings.
+Return a JSON array of ${capped.length} translated findings. Do not skip any findings.
 
 Findings to translate:
 ${JSON.stringify(capped, null, 2)}`;
@@ -306,23 +312,37 @@ ${JSON.stringify(capped, null, 2)}`;
     }
 
     const parsed = parseClaudeResponse(content);
+    
+    // ✅ NEW: Build a map of Claude's translations keyed by ID
+    const translationMap = new Map();
+    for (const item of parsed) {
+      if (item && typeof item === 'object' && item.id) {
+        translationMap.set(item.id, item);
+      }
+    }
+    
+    logger.debug(`Parsed ${parsed.length} items, mapped ${translationMap.size} by ID for ${panel}`);
+    
     const translated = [];
+    let matchedCount = 0;
+    let fallbackCount = 0;
 
-    for (let i = 0; i < capped.length; i++) {
-      const rawFinding = capped[i];
-      const parsedObj = parsed[i];
+    // ✅ UPDATED: Match by ID instead of array index
+    for (const rawFinding of capped) {
+      const parsedObj = translationMap.get(rawFinding.id);
       const validated = validateTranslatedFinding(parsedObj, rawFinding.id);
 
       if (validated) {
-        // ✅ SUCCESS PATH: Claude translation succeeded
+        // ✅ SUCCESS PATH: Claude translation matched by ID
         validated.panel = panel;
         validated.importance = mapSeverityToImportance(rawFinding.severity);
         validated.file = rawFinding.file;      // ← PRESERVED
         validated.line = rawFinding.line;      // ← PRESERVED
         validated.column = rawFinding.column;  // ← PRESERVED
         translated.push(validated);
+        matchedCount++;
       } else {
-        // ✅ PARTIAL FALLBACK PATH: Claude returned invalid JSON for this finding
+        // ✅ PARTIAL FALLBACK PATH: No matching translation found for this ID
         translated.push({
           id: rawFinding.id,
           panel,
@@ -335,13 +355,14 @@ ${JSON.stringify(capped, null, 2)}`;
           line: rawFinding.line,      // ← PRESERVED
           column: rawFinding.column,  // ← PRESERVED
         });
+        fallbackCount++;
+        logger.debug(`No translation match for finding ID: ${rawFinding.id}`);
       }
     }
 
-    const translatedCount = translated.filter(t => !t.staticAnalysisNote?.includes('Partial translation')).length;
-    const status = translatedCount === capped.length ? 'success' : translatedCount > 0 ? 'partial' : 'failed';
+    const status = matchedCount === capped.length ? 'success' : matchedCount > 0 ? 'partial' : 'failed';
 
-    logger.info(`Translated ${translatedCount}/${capped.length} findings for ${panel}`);
+    logger.info(`Translated ${matchedCount}/${capped.length} findings for ${panel} (${fallbackCount} fallbacks)`);
 
     return {
       panel,
@@ -350,7 +371,7 @@ ${JSON.stringify(capped, null, 2)}`;
       statusReason: status !== 'success' ? 'partial_parse' : undefined,
       truncated,
       originalCount,
-      translatedCount,
+      translatedCount: matchedCount,
     };
 
   } catch (error) {
