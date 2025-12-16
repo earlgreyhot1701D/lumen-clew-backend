@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import { CONFIG } from '../lib/config.js';
 
@@ -24,11 +24,9 @@ export function runESLint(tempDir, timeoutMs = CONFIG.FAST_SCAN.eslintTimeoutMs)
   try {
     logger.info(`Running ESLint on ${tempDir}`);
 
-    const command = `npx eslint "${tempDir}" --format=json --ignore-path /dev/null`;
-    
     let output;
     try {
-      output = execSync(command, {
+      output = execFileSync('npx', ['eslint', tempDir, '--format=json', '--ignore-path', '/dev/null'], {
         timeout: timeoutMs,
         maxBuffer: 10 * 1024 * 1024,
         encoding: 'utf-8',
