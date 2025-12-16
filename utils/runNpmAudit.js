@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -49,7 +49,8 @@ export function runNpmAudit(tempDir, timeoutMs) {
     let stdout;
 
     try {
-      stdout = execSync(`cd "${tempDir}" && npm audit --json`, {
+      stdout = execFileSync('npm', ['audit', '--json'], {
+        cwd: tempDir,
         timeout,
         maxBuffer: 10 * 1024 * 1024,
         encoding: 'utf-8',
