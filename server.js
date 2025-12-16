@@ -1,39 +1,24 @@
-const express = require('express');
-const cors = require('cors');
-require('dotenv').config();
+import express from 'express';
+import cors from 'cors';
+import { handleScanRequest } from './api/scan.js';
 
 const app = express();
+const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.set('trust proxy', true);
 
-// Health check endpoint
+// Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', message: 'Backend is running' });
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Placeholder scan endpoint
-app.post('/api/scan', (req, res) => {
-  const { repoUrl, scanMode } = req.body;
-
-  // This will be filled in by Lovable prompts
-  res.json({
-    status: 'success',
-    message: 'Scan endpoint ready',
-    repoUrl,
-    scanMode: scanMode || 'fast'
-  });
-});
-
-// Error handler
-app.use((err, req, res, next) => {
-  console.error(err);
-  res.status(500).json({ error: 'Internal server error' });
-});
+// Main scan endpoint
+app.post('/api/scan', handleScanRequest);
 
 // Start server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Lumen Clew backend running on port ${PORT}`);
+app.listen(PORT, () => {
+  console.log(`[LumenClew] Server running on port ${PORT}`);
 });
