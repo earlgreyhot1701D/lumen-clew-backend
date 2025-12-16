@@ -187,6 +187,10 @@ function parseClaudeResponse(text) {
   return objects;
 }
 
+/**
+ * buildFallback: Creates fallback findings when translation fails
+ * ✅ PRESERVES: file, line, column from raw findings
+ */
 function buildFallback(rawFindings, panel, reason) {
   return rawFindings.map((raw) => ({
     id: raw.id,
@@ -196,6 +200,9 @@ function buildFallback(rawFindings, panel, reason) {
     importance: mapSeverityToImportance(raw.severity),
     reflection: 'Consider reviewing this in the context of your specific project needs.',
     staticAnalysisNote: `Translation unavailable (${reason}). Showing original finding.`,
+    file: raw.file,      // ← PRESERVED
+    line: raw.line,      // ← PRESERVED
+    column: raw.column,  // ← PRESERVED
   }));
 }
 
@@ -307,10 +314,15 @@ ${JSON.stringify(capped, null, 2)}`;
       const validated = validateTranslatedFinding(parsedObj, rawFinding.id);
 
       if (validated) {
+        // ✅ SUCCESS PATH: Claude translation succeeded
         validated.panel = panel;
         validated.importance = mapSeverityToImportance(rawFinding.severity);
+        validated.file = rawFinding.file;      // ← PRESERVED
+        validated.line = rawFinding.line;      // ← PRESERVED
+        validated.column = rawFinding.column;  // ← PRESERVED
         translated.push(validated);
       } else {
+        // ✅ PARTIAL FALLBACK PATH: Claude returned invalid JSON for this finding
         translated.push({
           id: rawFinding.id,
           panel,
@@ -319,6 +331,9 @@ ${JSON.stringify(capped, null, 2)}`;
           importance: mapSeverityToImportance(rawFinding.severity),
           reflection: 'Consider reviewing this in the context of your specific project needs.',
           staticAnalysisNote: 'Partial translation - showing original finding.',
+          file: rawFinding.file,      // ← PRESERVED
+          line: rawFinding.line,      // ← PRESERVED
+          column: rawFinding.column,  // ← PRESERVED
         });
       }
     }
