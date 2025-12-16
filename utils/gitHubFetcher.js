@@ -193,13 +193,26 @@ export async function fetchGitHubRepo(repoUrl, scanMode = 'fast') {
   let filesScanned = 0;
   let filesSkipped = 0;
 
-  for (const file of filesToDownload) {
-    const success = await downloadFile(owner, repo, file.path, tempDir);
-    if (success) {
-      filesScanned++;
-    } else {
-      filesSkipped++;
-    }
+  // Download files in parallel batches for speed
+  const BATCH_SIZE = CONFIG.DOWNLOAD_BATCH_SIZE || 10;
+  const totalBatches = Math.ceil(filesToDownload.length / BATCH_SIZE);
+
+  for (let i = 0; i < filesToDownload.length; i += BATCH_SIZE) {
+    const batch = filesToDownload.slice(i, i + BATCH_SIZE);
+    
+    const results = await Promise.all(
+      batch.map(file => downloadFile(owner, repo, file.path, tempDir))
+    );
+    
+    results.forEach(success => {
+      if (success) {
+        filesScanned++;
+      } else {
+        filesSkipped++;
+      }
+    });
+    
+    logger.debug(`Downloaded batch ${Math.floor(i / BATCH_SIZE) + 1}/${totalBatches}`);
   }
 
   const totalSkipped = allFiles.length - filesScanned;
